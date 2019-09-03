@@ -228,6 +228,10 @@ func (r *RunningOutput) write(metrics []telegraf.Metric) error {
 
 	start := time.Now()
 	err := r.Output.Write(metrics)
+	if err != nil {
+		r.log.Errorf("Error during write: %v", err)
+	}
+
 	elapsed := time.Since(start)
 	r.WriteTime.Incr(elapsed.Nanoseconds())
 

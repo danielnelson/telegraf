@@ -264,22 +264,20 @@ func (a *Agent) runInputs(
 			interval = input.Config.Interval
 		}
 
+		var timer Timer
+		if a.Config.Agent.RoundInterval {
+			timer = NewAlignedTimer(startTime, interval, jitter)
+		} else {
+			timer = NewUnalignedTimer(interval, jitter)
+		}
+
 		acc := NewAccumulator(input, dst)
 		acc.SetPrecision(a.Precision())
 
 		wg.Add(1)
 		go func(input *models.RunningInput) {
 			defer wg.Done()
-
-			if a.Config.Agent.RoundInterval {
-				err := internal.SleepContext(
-					ctx, internal.AlignDuration(startTime, interval))
-				if err != nil {
-					return
-				}
-			}
-
-			a.gatherOnInterval(ctx, acc, input, interval, jitter)
+			a.gatherOnInterval(ctx, acc, input, timer)
 		}(input)
 	}
 	wg.Wait()
@@ -293,30 +291,23 @@ func (a *Agent) gatherOnInterval(
 	ctx context.Context,
 	acc telegraf.Accumulator,
 	input *models.RunningInput,
-	interval time.Duration,
-	jitter time.Duration,
+	timer Timer,
 ) {
 	defer panicRecover(input)
 
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
 	for {
-		err := internal.SleepContext(ctx, internal.RandomDuration(jitter))
-		if err != nil {
-			return
-		}
-
-		err = a.gatherOnce(acc, input, interval)
+		err := a.gatherOnce(acc, input, timer.Interval())
 		if err != nil {
 			acc.AddError(err)
 		}
 
 		select {
-		case <-ticker.C:
-			continue
 		case <-ctx.Done():
+			timer.Stop()
 			return
+		case tm := <-timer.Elapsed():
+			timer.Reset(tm)
+			continue
 		}
 	}
 }
@@ -326,9 +317,9 @@ func (a *Agent) gatherOnInterval(
 func (a *Agent) gatherOnce(
 	acc telegraf.Accumulator,
 	input *models.RunningInput,
-	timeout time.Duration,
+	interval time.Duration,
 ) error {
-	ticker := time.NewTicker(timeout)
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	done := make(chan error)
@@ -501,31 +492,28 @@ func (a *Agent) runOutputs(
 
 	var wg sync.WaitGroup
 	for _, output := range a.Config.Outputs {
-		interval := interval
+
 		// Overwrite agent flush_interval if this plugin has its own.
 		if output.Config.FlushInterval != 0 {
 			interval = output.Config.FlushInterval
 		}
 
-		jitter := jitter
 		// Overwrite agent flush_jitter if this plugin has its own.
 		if output.Config.FlushJitter != nil {
 			jitter = *output.Config.FlushJitter
 		}
 
+		var timer Timer
+		if a.Config.Agent.RoundInterval {
+			timer = NewAlignedTimer(startTime, interval, jitter)
+		} else {
+			timer = NewUnalignedTimer(interval, jitter)
+		}
+
 		wg.Add(1)
 		go func(output *models.RunningOutput) {
 			defer wg.Done()
-
-			if a.Config.Agent.RoundInterval {
-				err := internal.SleepContext(
-					ctx, internal.AlignDuration(startTime, interval))
-				if err != nil {
-					return
-				}
-			}
-
-			a.flush(ctx, output, interval, jitter)
+			flush(ctx, output, timer)
 		}(output)
 	}
 
@@ -546,55 +534,94 @@ func (a *Agent) runOutputs(
 	return nil
 }
 
-// flush runs an output's flush function periodically until the context is
-// done.
-func (a *Agent) flush(
+// Flush runs an output's flush logic periodically until the context is done.
+//
+// A write occurs after flush_interval + flush_jitter has elapsed since the
+// last write, or after one full batch of new metrics are received by the
+// output, whichever comes first.  After a write the next flush is rescheduled.
+//
+// The flush is not time aligned, this allows flushes to be evenly spaced
+// without worry that no time will be provided for the flush.
+func flush(
 	ctx context.Context,
 	output *models.RunningOutput,
-	interval time.Duration,
-	jitter time.Duration,
+	timer Timer,
 ) {
-	// since we are watching two channels we need a ticker with the jitter
-	// integrated.
-	ticker := NewTicker(interval, jitter)
-	defer ticker.Stop()
+	// When true the batch ready signal will be surpressed.  This prevents
+	// batch sends after an error in the output.
+	maskBatchReady := false
 
-	logError := func(err error) {
-		if err != nil {
-			log.Printf("E! [agent] Error writing to %s: %v", output.LogName(), err)
-		}
+	onDone := func() {
+		flushOnce(output, timer.Interval(), output.Write)
+		timer.Stop()
 	}
 
-	for {
-		// Favor shutdown over other methods.
+	onFlushInterval := func(tm time.Time) {
+		maskBatchReady = false
+		err := flushOnce(output, timer.Interval(), output.Write)
+		if err != nil {
+			maskBatchReady = true
+		}
+
+		// Clear the BatchReady signal to avoid immediate write.
 		select {
-		case <-ctx.Done():
-			logError(a.flushOnce(output, interval, output.Write))
-			return
+		case <-output.BatchReady:
 		default:
 		}
 
-		select {
-		case <-ticker.C:
-			logError(a.flushOnce(output, interval, output.Write))
-		case <-output.BatchReady:
-			// Favor the ticker over batch ready
-			select {
-			case <-ticker.C:
-				logError(a.flushOnce(output, interval, output.Write))
-			default:
-				logError(a.flushOnce(output, interval, output.WriteBatch))
-			}
-		case <-ctx.Done():
-			logError(a.flushOnce(output, interval, output.Write))
+		timer.Reset(tm)
+	}
+
+	onBatchReady := func(tm time.Time) {
+		if maskBatchReady {
 			return
+		}
+
+		err := flushOnce(output, timer.Interval(), output.WriteBatch)
+		if err != nil {
+			maskBatchReady = true
+		}
+
+		// If the timer cannot be stopped, drain the value from it before
+		// resetting.
+		if !timer.Stop() {
+			<-timer.Elapsed()
+		}
+		timer.Reset(tm)
+	}
+
+	for {
+		// Prioritized select over the context, timer, and outout.BatchReady
+		// channel in this order from highest to lowest priority.
+		select {
+		case <-ctx.Done():
+			onDone()
+			return
+		default:
+			select {
+			case <-ctx.Done():
+				onDone()
+				return
+			case tm := <-timer.Elapsed():
+				onFlushInterval(tm)
+			default:
+				select {
+				case <-ctx.Done():
+					onDone()
+					return
+				case tm := <-timer.Elapsed():
+					onFlushInterval(tm)
+				case tm := <-output.BatchReady:
+					onBatchReady(tm)
+				}
+			}
 		}
 	}
 }
 
-// flushOnce runs the output's Write function once, logging a warning each
-// interval it fails to complete before.
-func (a *Agent) flushOnce(
+// FlushOnce runs the output's Write function once, logging a warning each time
+// a full interval elapses before the write completes.
+func flushOnce(
 	output *models.RunningOutput,
 	timeout time.Duration,
 	writeFunc func() error,
@@ -613,12 +640,11 @@ func (a *Agent) flushOnce(
 			output.LogBufferStatus()
 			return err
 		case <-ticker.C:
-			log.Printf("W! [agent] [%q] did not complete within its flush interval",
+			log.Printf("W! [agent] %s did not complete within its flush interval",
 				output.LogName())
 			output.LogBufferStatus()
 		}
 	}
-
 }
 
 // initPlugins runs the Init function on plugins.
