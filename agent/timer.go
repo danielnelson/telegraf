@@ -6,18 +6,21 @@ import (
 	"github.com/influxdata/telegraf/internal"
 )
 
-// Timer represents a single future event.
+// Timer represents a single future event, the Timer can be reset to reschedule
+// the event.
+//
+// This timer encapsulates the jitter handling and compensates for timer drift.
 type Timer interface {
 	// Elapsed returns a channel that can be read from when the event as
 	// elapsed.  The value is the scheduled time.
 	Elapsed() <-chan time.Time
 
-	// Reset reschedules the event again.  The previous elapsed time should be
-	// passed in to ensure proper rescheduling.
+	// Reset reschedules the event again based on the current time and the
+	// initially set duration.
 	//
 	// If the event has not been read you must Stop the Timer and read the
 	// event, similar to time.Timer.
-	Reset(prev time.Time)
+	Reset()
 
 	// Stop the timer; returns true if the timer was stopped before sending the
 	// event.  If false, you must read any values in the elapsed channel.
@@ -35,30 +38,32 @@ type AlignedTimer struct {
 }
 
 func NewAlignedTimer(start time.Time, interval, jitter time.Duration) *AlignedTimer {
-	d := internal.AlignDuration(start, interval) +
-		internal.RandomDuration(jitter)
-
-	return &AlignedTimer{
+	t := &AlignedTimer{
 		interval: interval,
 		jitter:   jitter,
-		timer:    time.NewTimer(d),
 	}
+	d := t.nextDuration(start)
+	t.timer = time.NewTimer(d)
+	return t
 }
 
+// what about negative durations?  what about zero durations?
+//
 // could we skip intervals?  it should be impossible to do this without the
 // warning.  the next interval should be based on the previous interval, not
 // now().
 //
-// what about negative durations?  what about zero durations?
+// prev thing was a bad idea, what if write took longer than an interval, it
+// would expire immediately.  we do want to skip intervals
 //
-// prev thing was a bad idea, what if write took longer than an interval, it would expire immediately.  we do want to skip intervals
+// would be nice to guarantee log or run interval; because prev was reverted right now its racy
 
 func (t *AlignedTimer) Elapsed() <-chan time.Time {
 	return t.timer.C
 }
 
-func (t *AlignedTimer) Reset(prev time.Time) {
-	t.timer.Reset(t.nextDuration(prev))
+func (t *AlignedTimer) Reset() {
+	t.timer.Reset(t.nextDuration(time.Now()))
 }
 
 func (t *AlignedTimer) Stop() bool {
@@ -69,8 +74,8 @@ func (t *AlignedTimer) Interval() time.Duration {
 	return t.interval
 }
 
-func (t *AlignedTimer) nextDuration(prev time.Time) time.Duration {
-	return internal.AlignDuration(prev, t.interval) +
+func (t *AlignedTimer) nextDuration(now time.Time) time.Duration {
+	return internal.AlignDuration(now, t.interval) +
 		internal.RandomDuration(t.jitter)
 }
 
@@ -95,7 +100,7 @@ func (t *UnalignedTimer) Elapsed() <-chan time.Time {
 	return t.timer.C
 }
 
-func (t *UnalignedTimer) Reset(time.Time) {
+func (t *UnalignedTimer) Reset() {
 	t.timer.Reset(t.nextDuration())
 }
 

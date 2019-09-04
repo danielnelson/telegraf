@@ -305,9 +305,15 @@ func (a *Agent) gatherOnInterval(
 		case <-ctx.Done():
 			timer.Stop()
 			return
-		case tm := <-timer.Elapsed():
-			timer.Reset(tm)
-			continue
+		default:
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.Elapsed():
+				timer.Reset()
+				continue
+			}
 		}
 	}
 }
@@ -556,7 +562,7 @@ func flush(
 		timer.Stop()
 	}
 
-	onFlushInterval := func(tm time.Time) {
+	onFlushInterval := func() {
 		maskBatchReady = false
 		err := flushOnce(output, timer.Interval(), output.Write)
 		if err != nil {
@@ -569,10 +575,10 @@ func flush(
 		default:
 		}
 
-		timer.Reset(tm)
+		timer.Reset()
 	}
 
-	onBatchReady := func(tm time.Time) {
+	onBatchReady := func() {
 		if maskBatchReady {
 			return
 		}
@@ -587,7 +593,7 @@ func flush(
 		if !timer.Stop() {
 			<-timer.Elapsed()
 		}
-		timer.Reset(tm)
+		timer.Reset()
 	}
 
 	for {
@@ -602,17 +608,17 @@ func flush(
 			case <-ctx.Done():
 				onDone()
 				return
-			case tm := <-timer.Elapsed():
-				onFlushInterval(tm)
+			case <-timer.Elapsed():
+				onFlushInterval()
 			default:
 				select {
 				case <-ctx.Done():
 					onDone()
 					return
-				case tm := <-timer.Elapsed():
-					onFlushInterval(tm)
-				case tm := <-output.BatchReady:
-					onBatchReady(tm)
+				case <-timer.Elapsed():
+					onFlushInterval()
+				case <-output.BatchReady:
+					onBatchReady()
 				}
 			}
 		}
