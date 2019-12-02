@@ -245,6 +245,14 @@ func (a *Agent) Test(ctx context.Context, waitDuration time.Duration) error {
 	return nil
 }
 
+func (a *Agent) createTimer(start time.Time, interval, jitter time.Duration) Timer {
+	if a.Config.Agent.RoundInterval {
+		return NewAlignedTimer(start, interval, jitter)
+	}
+
+	return NewUnalignedTimer(interval, jitter)
+}
+
 // runInputs starts and triggers the periodic gather for Inputs.
 //
 // When the context is done the timers are stopped and this function returns
@@ -254,23 +262,17 @@ func (a *Agent) runInputs(
 	startTime time.Time,
 	dst chan<- telegraf.Metric,
 ) error {
+	interval := a.Config.Agent.Interval.Duration
+	jitter := a.Config.Agent.CollectionJitter.Duration
+
 	var wg sync.WaitGroup
 	for _, input := range a.Config.Inputs {
-		interval := a.Config.Agent.Interval.Duration
-		jitter := a.Config.Agent.CollectionJitter.Duration
-
 		// Overwrite agent interval if this plugin has its own.
 		if input.Config.Interval != 0 {
 			interval = input.Config.Interval
 		}
 
-		var timer Timer
-		if a.Config.Agent.RoundInterval {
-			timer = NewAlignedTimer(startTime, interval, jitter)
-		} else {
-			timer = NewUnalignedTimer(interval, jitter)
-		}
-
+		timer := a.createTimer(startTime, interval, jitter)
 		acc := NewAccumulator(input, dst)
 		acc.SetPrecision(a.Precision())
 

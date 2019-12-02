@@ -30,23 +30,6 @@ type Timer interface {
 	Interval() time.Duration
 }
 
-// AlignedTimer is a Timer that is aligned to the interval.
-type AlignedTimer struct {
-	interval time.Duration
-	jitter   time.Duration
-	timer    *time.Timer
-}
-
-func NewAlignedTimer(start time.Time, interval, jitter time.Duration) *AlignedTimer {
-	t := &AlignedTimer{
-		interval: interval,
-		jitter:   jitter,
-	}
-	d := t.nextDuration(start)
-	t.timer = time.NewTimer(d)
-	return t
-}
-
 // what about negative durations?  what about zero durations?
 //
 // could we skip intervals?  it should be impossible to do this without the
@@ -57,13 +40,68 @@ func NewAlignedTimer(start time.Time, interval, jitter time.Duration) *AlignedTi
 // would expire immediately.  we do want to skip intervals
 //
 // would be nice to guarantee log or run interval; because prev was reverted right now its racy
+//
+//
+// is this true: (no, racy between timer and ticker)
+//   separate ticker can be used to log while we are running the interval
+//   this timer just chooses the next time to run
+//
+// ticker is removed, each time the next schedule arrives we warn and bump schedule
 
-func (t *AlignedTimer) Elapsed() <-chan time.Time {
-	return t.timer.C
+// start time is a special now time so that all plugins agree to start at the same interval
+
+// AlignedTimer is a Timer that is aligned to the interval.
+type AlignedTimer struct {
+	interval time.Duration
+	jitter   time.Duration
+
+	timer *time.Timer
+	ch    chan time.Time
+
+	sched time.Time
 }
 
-func (t *AlignedTimer) Reset() {
-	t.timer.Reset(t.nextDuration(time.Now()))
+func NewAlignedTimer(start time.Time, interval, jitter time.Duration) *AlignedTimer {
+	t := &AlignedTimer{
+		interval: interval,
+		jitter:   jitter,
+	}
+	d := t.nextDuration(start)
+
+	t.timer = time.AfterFunc(d, t.f)
+
+	return t
+}
+
+func (t *AlignedTimer) Elapsed() <-chan time.Time {
+	return t.ch
+}
+
+func (t *AlignedTimer) f() {
+	ch <- time.Now()
+}
+
+func (t *AlignedTimer) Reset() <-chan time.Time {
+	now := time.Now()
+	actualSchedule := internal.AlignTime(now, t.interval)
+
+	expectedSchedule := internal.AlignTime(t.sched, t.interval)
+
+	if actualSchedule != expectedSchedule {
+	}
+
+	interval := actualTime.Sub(now)
+	jitter := internal.RandomDuration(t.jitter)
+
+	t.timer.Reset(t.nextDuration())
+
+	time.AfterFunc(duration, func() {
+		// schedule again based on schedule time
+
+		t.sched = scheduled
+		t.ch <- scheduled
+	})
+
 }
 
 func (t *AlignedTimer) Stop() bool {
@@ -79,6 +117,8 @@ func (t *AlignedTimer) nextDuration(now time.Time) time.Duration {
 		internal.RandomDuration(t.jitter)
 }
 
+//////////////
+//
 func NewUnalignedTimer(interval, jitter time.Duration) *UnalignedTimer {
 	t := &UnalignedTimer{
 		interval: interval,
@@ -114,4 +154,7 @@ func (t *UnalignedTimer) Interval() time.Duration {
 
 func (t *UnalignedTimer) nextDuration() time.Duration {
 	return t.interval + internal.RandomDuration(t.jitter)
+}
+
+type Ticker interface {
 }
