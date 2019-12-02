@@ -15,6 +15,11 @@ import (
 	"github.com/influxdata/telegraf/plugins/serializers/influx"
 )
 
+type Ticker interface {
+	Elapsed() <-chan time.Time
+	Stop()
+}
+
 // Agent runs a set of plugins.
 type Agent struct {
 	Config *config.Config
