@@ -22,6 +22,7 @@ type Starlark struct {
 	thread    *starlark.Thread
 	applyFunc *starlark.Function
 	args      starlark.Tuple
+	results   []telegraf.Metric
 }
 
 func (s *Starlark) Init() error {
@@ -60,6 +61,11 @@ func (s *Starlark) Init() error {
 	}
 
 	s.args = make(starlark.Tuple, 1)
+	met := &Metric{}
+	s.args[0] = met
+
+	s.results = make([]telegraf.Metric, 0, 10)
+
 	return nil
 }
 
@@ -72,9 +78,9 @@ func (s *Starlark) Description() string {
 }
 
 func (s *Starlark) Apply(metrics ...telegraf.Metric) []telegraf.Metric {
-	var results []telegraf.Metric
+	s.results = s.results[:]
 	for _, m := range metrics {
-		s.args[0] = &Metric{m}
+		s.args[0].(*Metric).Metric = m
 		rv, err := starlark.Call(s.thread, s.applyFunc, s.args, nil)
 		if err != nil {
 			// FIXME What do? toss metric/keep metric
@@ -90,19 +96,19 @@ func (s *Starlark) Apply(metrics ...telegraf.Metric) []telegraf.Metric {
 			for iter.Next(&v) {
 				switch v := v.(type) {
 				case *Metric:
-					results = append(results, v.Metric)
+					s.results = append(s.results, v.Metric)
 				default:
 					fmt.Printf("error, rv: %T\n", v)
 				}
 			}
 		case *Metric:
-			results = append(results, rv.Metric)
+			s.results = append(s.results, rv.Metric)
 		default:
 			fmt.Printf("error, rv: %T\n", rv)
 		}
 	}
 
-	return results
+	return s.results
 }
 
 func init() {

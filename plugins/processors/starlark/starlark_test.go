@@ -12,8 +12,11 @@ func BenchmarkNoop(b *testing.B) {
 	plugin := &Starlark{
 		Source: `
 def apply(metric):
+	print(dir(metric))
+	# metric.name = "howdy"
 	return metric
 `,
+		Log: testutil.Logger{},
 	}
 	err := plugin.Init()
 	if err != nil {
