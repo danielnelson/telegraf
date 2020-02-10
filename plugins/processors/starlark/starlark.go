@@ -3,6 +3,7 @@ package starlark
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/plugins/processors"
@@ -28,7 +29,7 @@ type Starlark struct {
 func (s *Starlark) Init() error {
 	s.thread = &starlark.Thread{
 		Name:  "processor.starlark",
-		Print: func(_ *starlark.Thread, msg string) { s.Log.Info(msg) },
+		Print: func(_ *starlark.Thread, msg string) { s.Log.Debug(msg) },
 	}
 
 	predeclared := starlark.StringDict{}
@@ -80,11 +81,15 @@ func (s *Starlark) Description() string {
 func (s *Starlark) Apply(metrics ...telegraf.Metric) []telegraf.Metric {
 	s.results = s.results[:]
 	for _, m := range metrics {
-		s.args[0].(*Metric).Metric = m
+		s.args[0].(*Metric).metric = m
 		rv, err := starlark.Call(s.thread, s.applyFunc, s.args, nil)
 		if err != nil {
 			// FIXME What do? toss metric/keep metric
-			s.Log.Errorf("Error calling apply function: %v", err)
+			// s.Log.Errorf("Error calling apply function: %v", err)
+			err := err.(*starlark.EvalError)
+			for _, line := range strings.Split(err.Backtrace(), "\n") {
+				s.Log.Error(line)
+			}
 			continue
 		}
 
@@ -96,13 +101,13 @@ func (s *Starlark) Apply(metrics ...telegraf.Metric) []telegraf.Metric {
 			for iter.Next(&v) {
 				switch v := v.(type) {
 				case *Metric:
-					s.results = append(s.results, v.Metric)
+					s.results = append(s.results, v.metric)
 				default:
 					fmt.Printf("error, rv: %T\n", v)
 				}
 			}
 		case *Metric:
-			s.results = append(s.results, rv.Metric)
+			s.results = append(s.results, rv.metric)
 		default:
 			fmt.Printf("error, rv: %T\n", rv)
 		}
