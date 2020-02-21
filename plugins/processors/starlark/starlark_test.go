@@ -6,20 +6,140 @@ import (
 
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/testutil"
+	"github.com/stretchr/testify/require"
 )
 
 func Test(t *testing.T) {
 	tests := []struct {
-		name   string
-		source string
+		name     string
+		source   string
+		input    telegraf.Metric
+		expected []telegraf.Metric
 	}{
 		{
-			name: "",
+			name: "noop",
+			source: `
+def apply(metric):
+	return metric
+			`,
+			input: testutil.MustMetric(
+				"cpu",
+				map[string]string{},
+				map[string]interface{}{
+					"time_idle": 42,
+				},
+				time.Unix(0, 0),
+			),
+			expected: []telegraf.Metric{
+				testutil.MustMetric(
+					"cpu",
+					map[string]string{},
+					map[string]interface{}{
+						"time_idle": 42,
+					},
+					time.Unix(0, 0),
+				),
+			},
+		},
+		{
+			name: "iterate tags",
+			source: `
+def apply(metric):
+	for k, v in metric.tags.items():
+		metric.fields[k] = v
+	return metric
+			`,
+			input: testutil.MustMetric(
+				"cpu",
+				map[string]string{
+					"host": "example.org",
+					"cpu":  "cpu0",
+				},
+				map[string]interface{}{
+					"time_idle": 42,
+				},
+				time.Unix(0, 0),
+			),
+			expected: []telegraf.Metric{
+				testutil.MustMetric(
+					"cpu",
+					map[string]string{
+						"host": "example.org",
+						"cpu":  "cpu0",
+					},
+					map[string]interface{}{
+						"time_idle": 42,
+						"host":      "example.org",
+						"cpu":       "cpu0",
+					},
+					time.Unix(0, 0),
+				),
+			},
+		},
+		{
+			name: "set name",
+			source: `
+def apply(metric):
+	metric.name = "cpu2"
+	return metric
+			`,
+			input: testutil.MustMetric(
+				"cpu",
+				map[string]string{},
+				map[string]interface{}{
+					"time_idle": 42,
+				},
+				time.Unix(0, 0),
+			),
+			expected: []telegraf.Metric{
+				testutil.MustMetric(
+					"cpu2",
+					map[string]string{},
+					map[string]interface{}{
+						"time_idle": 42,
+					},
+					time.Unix(0, 0),
+				),
+			},
+		},
+		{
+			name: "set time",
+			source: `
+def apply(metric):
+	metric.time -= metric.time % 100000000
+	return metric
+			`,
+			input: testutil.MustMetric(
+				"cpu",
+				map[string]string{},
+				map[string]interface{}{
+					"time_idle": 42,
+				},
+				time.Unix(42, 42).UTC(),
+			),
+			expected: []telegraf.Metric{
+				testutil.MustMetric(
+					"cpu",
+					map[string]string{},
+					map[string]interface{}{
+						"time_idle": 42,
+					},
+					time.Unix(42, 0).UTC(),
+				),
+			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			plugin := &Starlark{
+				Source: tt.source,
+				Log:    testutil.Logger{},
+			}
+			err := plugin.Init()
+			require.NoError(t, err)
 
+			actual := plugin.Apply(tt.input)
+			testutil.RequireMetricsEqual(t, tt.expected, actual)
 		})
 	}
 }
@@ -234,11 +354,13 @@ func TestTagMappingItems(t *testing.T) {
 def apply(metric):
 	print(dir(dict()))
 	for k, v in {'x': 1}.items():
-		print(k, v)
+		print('items: ', k, v)
 	print(type({'x': 1}.items))
 	print(dir(metric.tags))
 	for k in metric.tags.keys():
 		print(k)
+	for k,v in metric.tags.items():
+		print('items:',k,v)
 	return metric
 `,
 		Log: testutil.Logger{},

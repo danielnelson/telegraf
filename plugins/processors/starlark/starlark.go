@@ -36,13 +36,13 @@ func (s *Starlark) Init() error {
 
 	_, program, err := starlark.SourceProgram("processor.starlark", s.Source, predeclared.Has)
 	if err != nil {
-		return nil
+		return err
 	}
 
 	// Execute source
 	globals, err := program.Init(s.thread, predeclared)
 	if err != nil {
-		return nil
+		return err
 	}
 
 	// The source should define an apply function.
@@ -79,7 +79,7 @@ func (s *Starlark) Description() string {
 }
 
 func (s *Starlark) Apply(metrics ...telegraf.Metric) []telegraf.Metric {
-	s.results = s.results[:]
+	s.results = s.results[:0]
 	for _, m := range metrics {
 		s.args[0].(*Metric).metric = m
 		rv, err := starlark.Call(s.thread, s.applyFunc, s.args, nil)
@@ -101,13 +101,13 @@ func (s *Starlark) Apply(metrics ...telegraf.Metric) []telegraf.Metric {
 			for iter.Next(&v) {
 				switch v := v.(type) {
 				case *Metric:
-					s.results = append(s.results, v.metric)
+					s.results = append(s.results, v.Unwrap())
 				default:
 					fmt.Printf("error, rv: %T\n", v)
 				}
 			}
 		case *Metric:
-			s.results = append(s.results, rv.metric)
+			s.results = append(s.results, rv.Unwrap())
 		default:
 			fmt.Printf("error, rv: %T\n", rv)
 		}
