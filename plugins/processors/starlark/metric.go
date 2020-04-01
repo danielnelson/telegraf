@@ -9,6 +9,13 @@ import (
 	"go.starlark.net/starlark"
 )
 
+// type TypeError struct {
+
+// }
+
+// func (t TypeError) Error() string {
+// }
+
 type Metric struct {
 	metric telegraf.Metric
 }
@@ -87,7 +94,9 @@ func (m *Metric) SetName(name string, value starlark.Value) error {
 }
 
 func (m *Metric) Tags() *TagSet {
-	return &TagSet{metric: m.metric}
+	var tags TagSet
+	tags = TagSet(*m)
+	return &tags
 }
 
 // func (m *Metric) Fields() *FieldSet {

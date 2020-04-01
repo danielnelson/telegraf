@@ -6,19 +6,25 @@ import (
 	"strings"
 
 	"github.com/influxdata/telegraf"
+	"github.com/influxdata/telegraf/internal/choice"
 	"github.com/influxdata/telegraf/plugins/processors"
 	"go.starlark.net/starlark"
 )
 
 const (
-	description  = ""
+	description  = "Process metrics using a Starlark script"
 	sampleConfig = `
+  source = ""
+  on_error = "pass"
 `
+	defaultOnError = "pass"
 )
 
 type Starlark struct {
-	Source string          `toml:"source"`
-	Log    telegraf.Logger `toml:"-"`
+	Source  string `toml:"source"`
+	OnError string `toml:"on_error"`
+
+	Log telegraf.Logger `toml:"-"`
 
 	thread    *starlark.Thread
 	applyFunc *starlark.Function
@@ -27,6 +33,11 @@ type Starlark struct {
 }
 
 func (s *Starlark) Init() error {
+	err := choice.Check(s.OnError, []string{"pass", "drop"})
+	if err != nil {
+		return err
+	}
+
 	s.thread = &starlark.Thread{
 		Name:  "processor.starlark",
 		Print: func(_ *starlark.Thread, msg string) { s.Log.Debug(msg) },
@@ -108,6 +119,8 @@ func (s *Starlark) Apply(metrics ...telegraf.Metric) []telegraf.Metric {
 			}
 		case *Metric:
 			s.results = append(s.results, rv.Unwrap())
+		case starlark.NoneType:
+			continue
 		default:
 			fmt.Printf("error, rv: %T\n", rv)
 		}
@@ -118,6 +131,8 @@ func (s *Starlark) Apply(metrics ...telegraf.Metric) []telegraf.Metric {
 
 func init() {
 	processors.Add("starlark", func() telegraf.Processor {
-		return &Starlark{}
+		return &Starlark{
+			OnError: defaultOnError,
+		}
 	})
 }

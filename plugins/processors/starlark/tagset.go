@@ -3,6 +3,7 @@ package starlark
 import (
 	"errors"
 	"fmt"
+	"sort"
 
 	"github.com/influxdata/telegraf"
 	"go.starlark.net/starlark"
@@ -62,27 +63,27 @@ func (m *TagSet) Items() []starlark.Tuple {
 	}
 	return items
 }
+
+type builtinMethod func(b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error)
+
+var tagsetMethods = map[string]builtinMethod{
+	"clear":      dict_clear,
+	"get":        dict_get,
+	"items":      dict_items,
+	"keys":       dict_keys,
+	"pop":        dict_pop,
+	"popitem":    dict_popitem,
+	"setdefault": dict_setdefault,
+	"update":     dict_update,
+	"values":     dict_values,
+}
+
 func (m *TagSet) AttrNames() []string {
-	return []string{"items", "keys"}
+	return builtinAttrNames(tagsetMethods)
 }
 
 func (m *TagSet) Attr(name string) (starlark.Value, error) {
-	switch name {
-	case "items":
-		impl := func(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-			return dict_items(b, args, kwargs)
-		}
-		return starlark.NewBuiltin("items", impl).BindReceiver(m), nil
-	case "keys":
-		impl := func(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-			return dict_keys(b, args, kwargs)
-		}
-		return starlark.NewBuiltin("keys", impl).BindReceiver(m), nil
-	default:
-		// "no such field or method"
-		return nil, nil
-	}
-	return nil, nil
+	return builtinAttr(m, name, tagsetMethods)
 }
 
 func (m *TagSet) Iterate() starlark.Iterator {
@@ -90,24 +91,75 @@ func (m *TagSet) Iterate() starlark.Iterator {
 }
 
 func (m *TagSet) Delete(k starlark.Value) (v starlark.Value, found bool, err error) {
-	panic("not implemented")
+	if key, ok := k.(starlark.String); ok {
+		value, ok := m.metric.GetTag(key.GoString())
+		if ok {
+			m.metric.RemoveTag(key.GoString())
+			return starlark.String(value), ok, nil
+		}
+	}
+	return nil, false, errors.New("tag key must be of type 'str'")
+}
+
+func (m *TagSet) first() (starlark.Value, bool) {
+	for _, tag := range m.metric.TagList() {
+		return starlark.String(tag.Key), true
+	}
+	return starlark.None, false
 }
 
 func (m *TagSet) Clear() error {
-	panic("not implemented")
+	for _, tag := range m.metric.TagList() {
+		m.metric.RemoveTag(tag.Key)
+	}
+	return nil
 }
 
 func (m *TagSet) SetKey(k, v starlark.Value) error {
-	panic("not implemented")
+	var key starlark.String
+	var value starlark.String
+	var ok bool
+	if key, ok = k.(starlark.String); !ok {
+		return errors.New("tag key must be of type 'str'")
+	}
+	if value, ok = v.(starlark.String); !ok {
+		return errors.New("tag value must be of type 'str'")
+	}
+
+	m.metric.AddTag(key.GoString(), value.GoString())
+	return nil
 }
 
-func (d *Dict) Len() int {
-	panic("not implemented")
+func (m *TagSet) Len() int {
+	return len(m.metric.TagList())
 }
 
 var _ starlark.IterableMapping = (*TagSet)(nil)
 
 // ---- methods of built-in types ---
+
+// library.go
+func builtinAttr(recv starlark.Value, name string, methods map[string]builtinMethod) (starlark.Value, error) {
+	method := methods[name]
+	if method == nil {
+		return nil, nil // no such method
+	}
+
+	// Allocate a closure over 'method'.
+	impl := func(thread *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+		return method(b, args, kwargs)
+	}
+	return starlark.NewBuiltin(name, impl).BindReceiver(recv), nil
+}
+
+func builtinAttrNames(methods map[string]builtinMethod) []string {
+	names := make([]string, 0, len(methods))
+	for name := range methods {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
 
 // https://github.com/google/starlark-go/blob/master/doc/spec.md#dict·get
 func dict_get(b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
@@ -176,7 +228,7 @@ func dict_popitem(b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tu
 		return nil, err
 	}
 	recv := b.Receiver().(*TagSet)
-	k, ok := recv.ht.first()
+	k, ok := recv.first()
 	if !ok {
 		return nil, nameErr(b, "empty dict")
 	}
