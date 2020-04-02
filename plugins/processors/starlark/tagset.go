@@ -352,3 +352,30 @@ func updateDict(dict *TagSet, updates starlark.Tuple, kwargs []starlark.Tuple) e
 func nameErr(b *starlark.Builtin, msg interface{}) error {
 	return fmt.Errorf("%s: %v", b.Name(), msg)
 }
+
+type TagIterator struct {
+	metric telegraf.Metric
+	index  int
+}
+
+var _ starlark.Iterator = (*TagIterator)(nil)
+
+func (i *TagIterator) Next(p *starlark.Value) bool {
+	if i.index >= len(i.metric.TagList()) {
+		return false
+	}
+
+	tag := i.metric.TagList()[i.index]
+
+	key := starlark.String(tag.Key)
+	val := starlark.String(tag.Value)
+
+	pair := starlark.Tuple{key, val}
+
+	*p = pair
+	i.index++
+	return true
+}
+
+func (i *TagIterator) Done() {
+}

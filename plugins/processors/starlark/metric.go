@@ -84,18 +84,16 @@ func (m *Metric) Name() starlark.String {
 }
 
 func (m *Metric) SetName(name string, value starlark.Value) error {
-	switch v := value.(type) {
-	case starlark.String:
-		m.metric.SetName(v.GoString())
+	if str, ok := v.(starlark.String); ok {
+		m.metric.SetName(str.GoString())
 		return nil
-	default:
-		return errors.New("type error")
 	}
+
+	return errors.New("type error")
 }
 
 func (m *Metric) Tags() *TagSet {
-	var tags TagSet
-	tags = TagSet(*m)
+	tags := TagSet(*m)
 	return &tags
 }
 
@@ -175,24 +173,4 @@ func (m *Metric) FieldsToDict() *starlark.Dict {
 		dict.SetKey(sk, sv)
 	}
 	return dict
-}
-
-type TagIterator struct {
-	metric telegraf.Metric
-	index  int
-}
-
-var _ starlark.Iterator = (*TagIterator)(nil)
-
-func (i *TagIterator) Next(p *starlark.Value) bool {
-	if i.index >= len(i.metric.TagList()) {
-		return false
-	}
-	s := starlark.String(i.metric.TagList()[i.index].Key)
-	*p = s
-	i.index++
-	return true
-}
-
-func (i *TagIterator) Done() {
 }
