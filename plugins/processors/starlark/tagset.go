@@ -167,7 +167,7 @@ func dict_get(b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple)
 	if err := starlark.UnpackPositionalArgs(b.Name(), args, kwargs, 1, &key, &dflt); err != nil {
 		return nil, err
 	}
-	if v, ok, err := b.Receiver().(*TagSet).Get(key); err != nil {
+	if v, ok, err := b.Receiver().(starlark.Mapping).Get(key); err != nil {
 		return nil, nameErr(b, err)
 	} else if ok {
 		return v, nil
@@ -190,7 +190,7 @@ func dict_items(b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tupl
 	if err := starlark.UnpackPositionalArgs(b.Name(), args, kwargs, 0); err != nil {
 		return nil, err
 	}
-	items := b.Receiver().(*TagSet).Items()
+	items := b.Receiver().(starlark.IterableMapping).Items()
 	res := make([]starlark.Value, len(items))
 	for i, item := range items {
 		res[i] = item // convert [2]starlark.Value to starlark.Value
@@ -245,12 +245,12 @@ func dict_setdefault(b *starlark.Builtin, args starlark.Tuple, kwargs []starlark
 	if err := starlark.UnpackPositionalArgs(b.Name(), args, kwargs, 1, &key, &dflt); err != nil {
 		return nil, err
 	}
-	tags := b.Receiver().(*TagSet)
-	if v, ok, err := tags.Get(key); err != nil {
+	recv := b.Receiver().(starlark.HasSetKey)
+	if v, ok, err := recv.Get(key); err != nil {
 		return nil, nameErr(b, err)
 	} else if ok {
 		return v, nil
-	} else if err := tags.SetKey(key, dflt); err != nil {
+	} else if err := recv.SetKey(key, dflt); err != nil {
 		return nil, nameErr(b, err)
 	} else {
 		return dflt, nil

@@ -929,44 +929,37 @@ def apply(metric):
 			input: []telegraf.Metric{
 				testutil.MustMetric(
 					"cpu",
-					map[string]string{
-						"cpu": "cpu0",
-					},
-					map[string]interface{}{
-						"time_idle": 0,
-					},
+					map[string]string{},
+					map[string]interface{}{},
 					time.Unix(0, 0),
 				),
 			},
 			expected: []telegraf.Metric{
 				testutil.MustMetric(
 					"cpu",
-					map[string]string{
-						"cpu": "cpu0",
-					},
+					map[string]string{},
 					map[string]interface{}{
-						"time_idle": 0,
-						"host":      "example.org",
+						"host": "example.org",
 					},
 					time.Unix(0, 0),
 				),
 			},
 		},
 		{
-			name: "get tag",
+			name: "get string field",
 			source: `
 def apply(metric):
-	metric.tags['set'] = metric.tags['cpu']
+	value = metric.fields['value']
+	if value != "xyzzy" and type(value) != "str":
+		return
 	return metric
 `,
 			input: []telegraf.Metric{
 				testutil.MustMetric(
 					"cpu",
-					map[string]string{
-						"cpu": "cpu0",
-					},
+					map[string]string{},
 					map[string]interface{}{
-						"time_idle": 0,
+						"value": "xyzzy",
 					},
 					time.Unix(0, 0),
 				),
@@ -974,18 +967,183 @@ def apply(metric):
 			expected: []telegraf.Metric{
 				testutil.MustMetric(
 					"cpu",
-					map[string]string{
-						"cpu": "cpu0",
-						"set": "cpu0",
-					},
+					map[string]string{},
 					map[string]interface{}{
-						"time_idle": 0,
+						"value": "xyzzy",
 					},
 					time.Unix(0, 0),
 				),
 			},
 		},
 		{
+			name: "set integer field",
+			source: `
+def apply(metric):
+	metric.fields['value'] = 42
+	return metric
+`,
+			input: []telegraf.Metric{
+				testutil.MustMetric(
+					"cpu",
+					map[string]string{},
+					map[string]interface{}{},
+					time.Unix(0, 0),
+				),
+			},
+			expected: []telegraf.Metric{
+				testutil.MustMetric(
+					"cpu",
+					map[string]string{},
+					map[string]interface{}{
+						"value": 42,
+					},
+					time.Unix(0, 0),
+				),
+			},
+		},
+		{
+			name: "get integer field",
+			source: `
+def apply(metric):
+	value = metric.fields['value']
+	if value != 42 and type(value) != "int":
+		return
+	return metric
+`,
+			input: []telegraf.Metric{
+				testutil.MustMetric(
+					"cpu",
+					map[string]string{},
+					map[string]interface{}{
+						"value": 42,
+					},
+					time.Unix(0, 0),
+				),
+			},
+			expected: []telegraf.Metric{
+				testutil.MustMetric(
+					"cpu",
+					map[string]string{},
+					map[string]interface{}{
+						"value": 42,
+					},
+					time.Unix(0, 0),
+				),
+			},
+		},
+		{
+			name: "set bool field",
+			source: `
+def apply(metric):
+	metric.fields['value'] = True
+	return metric
+`,
+			input: []telegraf.Metric{
+				testutil.MustMetric(
+					"cpu",
+					map[string]string{},
+					map[string]interface{}{},
+					time.Unix(0, 0),
+				),
+			},
+			expected: []telegraf.Metric{
+				testutil.MustMetric(
+					"cpu",
+					map[string]string{},
+					map[string]interface{}{
+						"value": true,
+					},
+					time.Unix(0, 0),
+				),
+			},
+		},
+		{
+			name: "get bool field",
+			source: `
+def apply(metric):
+	value = metric.fields['value']
+	if value and type(value) != "bool":
+		return
+	return metric
+`,
+			input: []telegraf.Metric{
+				testutil.MustMetric(
+					"cpu",
+					map[string]string{},
+					map[string]interface{}{
+						"value": true,
+					},
+					time.Unix(0, 0),
+				),
+			},
+			expected: []telegraf.Metric{
+				testutil.MustMetric(
+					"cpu",
+					map[string]string{},
+					map[string]interface{}{
+						"value": true,
+					},
+					time.Unix(0, 0),
+				),
+			},
+		},
+		{
+			name: "set float field",
+			source: `
+def apply(metric):
+	metric.fields['value'] = 42.5
+	return metric
+`,
+			input: []telegraf.Metric{
+				testutil.MustMetric(
+					"cpu",
+					map[string]string{},
+					map[string]interface{}{},
+					time.Unix(0, 0),
+				),
+			},
+			expected: []telegraf.Metric{
+				testutil.MustMetric(
+					"cpu",
+					map[string]string{},
+					map[string]interface{}{
+						"value": 42.5,
+					},
+					time.Unix(0, 0),
+				),
+			},
+		},
+		{
+			name: "get float field",
+			source: `
+def apply(metric):
+	value = metric.fields['value']
+	if value == 42.5 and type(value) != "float":
+		return
+	return metric
+`,
+			input: []telegraf.Metric{
+				testutil.MustMetric(
+					"cpu",
+					map[string]string{},
+					map[string]interface{}{
+						"value": 42.5,
+					},
+					time.Unix(0, 0),
+				),
+			},
+			expected: []telegraf.Metric{
+				testutil.MustMetric(
+					"cpu",
+					map[string]string{},
+					map[string]interface{}{
+						"value": 42.5,
+					},
+					time.Unix(0, 0),
+				),
+			},
+		},
+		{ ///////
 			name: "clear",
 			source: `
 def apply(metric):

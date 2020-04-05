@@ -48,7 +48,7 @@ func (m *Metric) Attr(name string) (starlark.Value, error) {
 	case "tags":
 		return m.Tags(), nil
 	case "fields":
-		return m.FieldsToDict(), nil
+		return m.Fields(), nil
 	case "time":
 		return m.Time(), nil
 	default:
@@ -87,6 +87,11 @@ func (m *Metric) SetName(value starlark.Value) error {
 func (m *Metric) Tags() *TagSet {
 	tags := TagSet(*m)
 	return &tags
+}
+
+func (m *Metric) Fields() *FieldSet {
+	fields := FieldSet(*m)
+	return &fields
 }
 
 func (m *Metric) Time() starlark.Int {

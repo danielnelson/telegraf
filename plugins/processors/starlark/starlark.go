@@ -8,6 +8,7 @@ import (
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/internal/choice"
 	"github.com/influxdata/telegraf/plugins/processors"
+	"go.starlark.net/resolve"
 	"go.starlark.net/starlark"
 )
 
@@ -127,6 +128,12 @@ func (s *Starlark) Apply(metrics ...telegraf.Metric) []telegraf.Metric {
 	}
 
 	return s.results
+}
+
+func init() {
+	resolve.AllowFloat = true
+	resolve.AllowLambda = true
+	resolve.AllowSet = true
 }
 
 func init() {
