@@ -104,6 +104,11 @@ func (o *OpenVPN) Start(telegraf.Accumulator) error {
 		return err
 	}
 
+	line, err = r.ReadBytes('\n')
+	if err != nil {
+		return err
+	}
+
 	if len(line) != 0 && bytes.HasPrefix(line, []byte("SUCCESS:")) {
 		return nil
 	}
