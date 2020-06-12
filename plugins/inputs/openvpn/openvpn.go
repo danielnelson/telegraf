@@ -237,14 +237,14 @@ func (o *OpenVPN) getStatus(ctx context.Context, acc telegraf.Accumulator) error
 	}
 }
 
-func (o *OpenVPN) Stop() error {
+func (o *OpenVPN) Stop() {
 	if o.conn != nil {
-		_, err := o.conn.Write([]byte("quit\n"))
+		o.conn.Write([]byte("quit\n"))
 		o.conn.Close()
-		return err
 	}
-	return nil
 }
+
+var _ telegraf.ServiceInput = &OpenVPN{}
 
 func init() {
 	inputs.Add("openvpn", func() telegraf.Input {
