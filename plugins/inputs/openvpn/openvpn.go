@@ -237,7 +237,7 @@ func (o *OpenVPN) getStatus(ctx context.Context, acc telegraf.Accumulator) error
 	}
 }
 
-func (o *OpenVPN) Close(telegraf.Accumulator) error {
+func (o *OpenVPN) Stop() error {
 	if o.conn != nil {
 		_, err := o.conn.Write([]byte("quit\n"))
 		o.conn.Close()
